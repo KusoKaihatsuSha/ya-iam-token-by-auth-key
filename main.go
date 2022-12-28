@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -82,10 +83,25 @@ func getIAMToken() string {
 }
 
 func main() {
+	export := false
+	save := true
 	iam := getIAMToken()
-	err := ioutil.WriteFile("IAM_token_output.txt", []byte(iam), 755)
-	if err != nil {
-		fmt.Errorf("error file save: %w", err)
+	flag.BoolVar(&export, "export", false, "use flag for export to ENV")
+	flag.BoolVar(&save, "save", true, "use flag for saving to file")
+	flag.Parse()
+	if export {
+		os.Setenv("YC_TOKEN", iam)
+		fmt.Printf("exported success \n\nexport YC_TOKEN=%s\n\n", iam)
+	} else {
+		fmt.Printf("use text below for ctrl+c --> ctrl+v \n\nexport YC_TOKEN=%s\n\n", iam)
 	}
-	fmt.Printf("use text below for ctrl+c --> ctrl+v \n\nexport YC_TOKEN=%s", iam)
+	if save {
+		err := ioutil.WriteFile("IAM_token_output.txt", []byte(iam), 755)
+		if err != nil {
+			fmt.Errorf("error file save: %w\n\n", err)
+			return
+		}
+		fmt.Println("IAM token save to **IAM_token_output.txt**")
+	}
+
 }
