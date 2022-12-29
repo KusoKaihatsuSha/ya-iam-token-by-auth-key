@@ -7,10 +7,17 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/rs/zerolog/log"
+)
+
+const (
+	audience = "https://iam.api.cloud.yandex.net/iam/v1/tokens"
+	API      = "https://iam.api.cloud.yandex.net/iam/v1/tokens"
 )
 
 type Key struct {
@@ -28,7 +35,7 @@ func signedToken(k Key) string {
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 		NotBefore: jwt.NewNumericDate(time.Now()),
-		Audience:  []string{"https://iam.api.cloud.yandex.net/iam/v1/tokens"},
+		Audience:  []string{audience},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodPS256, claims)
 	token.Header["kid"] = k.ID
@@ -43,11 +50,10 @@ func signedToken(k Key) string {
 	return signed
 }
 
-func parseKeys() Key {
+func parseKeys(loadPath string) Key {
 	key := Key{}
-	file, err := os.ReadFile("authorized_key.json")
+	file, err := os.ReadFile(loadPath)
 	if err != nil {
-		fmt.Errorf("not found 'authorized_key.json' file in same directory: %w", err)
 		panic(err)
 	}
 	err = json.Unmarshal(file, &key)
@@ -57,10 +63,10 @@ func parseKeys() Key {
 	return key
 }
 
-func getIAMToken() string {
-	jot := signedToken(parseKeys())
+func getIAMToken(loadPath string) string {
+	jot := signedToken(parseKeys(loadPath))
 	resp, err := http.Post(
-		"https://iam.api.cloud.yandex.net/iam/v1/tokens",
+		API,
 		"application/json",
 		strings.NewReader(fmt.Sprintf(`{"jwt":"%s"}`, jot)),
 	)
@@ -83,25 +89,28 @@ func getIAMToken() string {
 }
 
 func main() {
-	export := false
-	save := true
-	iam := getIAMToken()
-	flag.BoolVar(&export, "export", false, "use flag for export to ENV")
-	flag.BoolVar(&save, "save", true, "use flag for saving to file")
+	raw := false
+	tokenName, load, save := "", "", ""
+	flag.StringVar(&tokenName, "token", "YC_TOKEN", "set token name")
+	flag.BoolVar(&raw, "raw", false, "use flag for print without 'export' text. If 'false' you may use\n\n'eval $(app)'\n\nOR\n\nFor /f \"delims=\" %A in ('ya-iam-token-by-auth-key.exe') do call %A")
+	flag.StringVar(&load, "from", "authorized_key.json", "use flag for set filepath with keys")
+	flag.StringVar(&save, "to", "", "use flag for saving IAM to filepath. Example: 'IAM_token_output.txt'")
 	flag.Parse()
-	if export {
-		os.Setenv("YC_TOKEN", iam)
-		fmt.Printf("exported success \n\nexport YC_TOKEN=%s\n\n", iam)
+	iam := getIAMToken(load)
+	if raw {
+		fmt.Printf("%s", iam)
 	} else {
-		fmt.Printf("use text below for ctrl+c --> ctrl+v \n\nexport YC_TOKEN=%s\n\n", iam)
+		if runtime.GOOS == "windows" {
+			fmt.Printf("set %s=%s", tokenName, iam)
+		} else {
+			fmt.Printf("export %s=%s", tokenName, iam)
+		}
 	}
-	if save {
-		err := ioutil.WriteFile("IAM_token_output.txt", []byte(iam), 755)
+	if pathSave := strings.TrimSpace(save); pathSave != "" {
+		err := ioutil.WriteFile(pathSave, []byte(iam), 755)
 		if err != nil {
-			fmt.Errorf("error file save: %w\n\n", err)
+			log.Debug().Msgf("%v", err)
 			return
 		}
-		fmt.Println("IAM token save to **IAM_token_output.txt**")
 	}
-
 }
